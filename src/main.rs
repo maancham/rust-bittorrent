@@ -1,4 +1,4 @@
-use std::{env, fs, time::SystemTime};
+use std::{env, fs, time::SystemTime, io::{Read, Write}, net::TcpStream};
 use serde_json::{Map, Value};
 use sha1::{Digest, Sha1};
 
@@ -73,6 +73,19 @@ impl Torrent {
         
         let peers_bytes = hex::decode(peers_hex).unwrap();
         parse_peers(&peers_bytes)
+    }
+    
+    fn handshake(&self, peer_addr: &str) -> String {
+        let peer_id = generate_peer_id();
+        let handshake_msg = create_handshake(&self.info_hash, &peer_id);
+        
+        let mut stream = TcpStream::connect(peer_addr).unwrap();
+        stream.write_all(&handshake_msg).unwrap();
+        
+        let mut response = [0u8; 68];
+        stream.read_exact(&mut response).unwrap();
+        
+        hex::encode(&response[48..68])
     }
 }
 
@@ -186,6 +199,18 @@ fn generate_peer_id() -> [u8; 20] {
     peer_id
 }
 
+fn create_handshake(info_hash: &[u8], peer_id: &[u8]) -> Vec<u8> {
+    let mut handshake = Vec::with_capacity(68);
+    
+    handshake.push(19);
+    handshake.extend_from_slice(b"BitTorrent protocol");
+    handshake.extend_from_slice(&[0u8; 8]);
+    handshake.extend_from_slice(info_hash);
+    handshake.extend_from_slice(peer_id);
+    
+    handshake
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let command = &args[1];
@@ -210,6 +235,12 @@ fn main() {
             let torrent = Torrent::from_file(&args[2]);
             let peers = torrent.discover_peers();
             peers.iter().for_each(|peer| println!("{}", peer));
+        }
+        "handshake" => {
+            let torrent = Torrent::from_file(&args[2]);
+            let peer_addr = &args[3];
+            let peer_id = torrent.handshake(peer_addr);
+            println!("Peer ID: {}", peer_id);
         }
         _ => println!("unknown command: {}", command)
     }
