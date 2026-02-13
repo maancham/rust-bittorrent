@@ -1,5 +1,6 @@
 use std::{env, fs};
 use serde_json::{Map, Value};
+use sha1::{Digest, Sha1};
 
 fn decode_bencoded_value(encoded_value: &str) -> Value {
     decode_value(encoded_value.as_bytes()).0
@@ -63,6 +64,23 @@ fn decode_value(bytes: &[u8]) -> (Value, usize) {
     }
 }
 
+fn extract_info_bytes(bytes: &[u8]) -> Option<&[u8]> {
+    let info_key = b"4:info";
+    bytes.windows(info_key.len())
+        .position(|window| window == info_key)
+        .map(|pos| {
+            let start = pos + info_key.len();
+            let (_, consumed) = decode_value(&bytes[start..]);
+            &bytes[start..start + consumed]
+        })
+}
+
+fn calculate_info_hash(info_bytes: &[u8]) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(info_bytes);
+    hex::encode(hasher.finalize())
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let command = &args[1];
@@ -83,8 +101,12 @@ fn main() {
             let info = torrent.get("info").and_then(|v| v.as_object()).unwrap();
             let length = info.get("length").and_then(|v| v.as_i64()).unwrap();
             
+            let info_bytes = extract_info_bytes(&bytes).unwrap();
+            let info_hash = calculate_info_hash(info_bytes);
+            
             println!("Tracker URL: {}", tracker_url);
             println!("Length: {}", length);
+            println!("Info Hash: {}", info_hash);
         }
         _ => println!("unknown command: {}", command)
     }
