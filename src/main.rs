@@ -1,6 +1,80 @@
-use std::{env, fs};
+use std::{env, fs, time::SystemTime};
 use serde_json::{Map, Value};
 use sha1::{Digest, Sha1};
+
+struct Torrent {
+    announce: String,
+    length: i64,
+    info_hash: Vec<u8>,
+    piece_length: i64,
+    piece_hashes: Vec<String>,
+}
+
+impl Torrent {
+    fn from_file(path: &str) -> Self {
+        let bytes = fs::read(path).unwrap();
+        let decoded = decode_value(&bytes).0;
+        
+        let torrent_dict = decoded.as_object().unwrap();
+        let info = torrent_dict.get("info").and_then(|v| v.as_object()).unwrap();
+        
+        let announce = torrent_dict
+            .get("announce")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .to_string();
+        
+        let length = info.get("length").and_then(|v| v.as_i64()).unwrap();
+        let piece_length = info.get("piece length").and_then(|v| v.as_i64()).unwrap();
+        
+        let info_bytes = extract_info_bytes(&bytes).unwrap();
+        let info_hash = calculate_hash(info_bytes);
+        
+        let pieces_hex = info.get("pieces").and_then(|v| v.as_str()).unwrap();
+        let piece_hashes = hex::decode(pieces_hex)
+            .unwrap()
+            .chunks(20)
+            .map(hex::encode)
+            .collect();
+        
+        Self {
+            announce,
+            length,
+            info_hash,
+            piece_length,
+            piece_hashes,
+        }
+    }
+    
+    fn info_hash_hex(&self) -> String {
+        hex::encode(&self.info_hash)
+    }
+    
+    fn discover_peers(&self) -> Vec<String> {
+        let peer_id = generate_peer_id();
+        let url = format!(
+            "{}?info_hash={}&peer_id={}&port=6881&uploaded=0&downloaded=0&left={}&compact=1",
+            self.announce,
+            url_encode_bytes(&self.info_hash),
+            url_encode_bytes(&peer_id),
+            self.length
+        );
+        
+        let response = reqwest::blocking::get(&url).unwrap();
+        let response_bytes = response.bytes().unwrap();
+        let decoded = decode_value(&response_bytes).0;
+        
+        let peers_hex = decoded
+            .as_object()
+            .unwrap()
+            .get("peers")
+            .and_then(|v| v.as_str())
+            .unwrap();
+        
+        let peers_bytes = hex::decode(peers_hex).unwrap();
+        parse_peers(&peers_bytes)
+    }
+}
 
 fn decode_bencoded_value(encoded_value: &str) -> Value {
     decode_value(encoded_value.as_bytes()).0
@@ -75,10 +149,41 @@ fn extract_info_bytes(bytes: &[u8]) -> Option<&[u8]> {
         })
 }
 
-fn calculate_info_hash(info_bytes: &[u8]) -> String {
+fn calculate_hash(bytes: &[u8]) -> Vec<u8> {
     let mut hasher = Sha1::new();
-    hasher.update(info_bytes);
-    hex::encode(hasher.finalize())
+    hasher.update(bytes);
+    hasher.finalize().to_vec()
+}
+
+fn url_encode_bytes(bytes: &[u8]) -> String {
+    bytes.iter()
+        .map(|&b| format!("%{:02x}", b))
+        .collect()
+}
+
+fn parse_peers(peers_bytes: &[u8]) -> Vec<String> {
+    peers_bytes.chunks(6)
+        .map(|chunk| {
+            let ip = format!("{}.{}.{}.{}", chunk[0], chunk[1], chunk[2], chunk[3]);
+            let port = u16::from_be_bytes([chunk[4], chunk[5]]);
+            format!("{}:{}", ip, port)
+        })
+        .collect()
+}
+
+fn generate_peer_id() -> [u8; 20] {
+    let mut peer_id = [0u8; 20];
+    peer_id[..8].copy_from_slice(b"-RS0001-");
+    
+    let timestamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    
+    let timestamp_bytes = timestamp.to_le_bytes();
+    peer_id[8..20].copy_from_slice(&timestamp_bytes[..12]);
+    
+    peer_id
 }
 
 fn main() {
@@ -92,32 +197,19 @@ fn main() {
             println!("{}", decoded_value.to_string());
         }
         "info" => {
-            let file_path = &args[2];
-            let bytes = fs::read(file_path).unwrap();
-            let decoded = decode_value(&bytes).0;
+            let torrent = Torrent::from_file(&args[2]);
             
-            let torrent = decoded.as_object().unwrap();
-            let tracker_url = torrent.get("announce").and_then(|v| v.as_str()).unwrap();
-            let info = torrent.get("info").and_then(|v| v.as_object()).unwrap();
-            let length = info.get("length").and_then(|v| v.as_i64()).unwrap();
-            let piece_length = info.get("piece length").and_then(|v| v.as_i64()).unwrap();
-            let pieces_hex = info.get("pieces").and_then(|v| v.as_str()).unwrap();
-            
-            let info_bytes = extract_info_bytes(&bytes).unwrap();
-            let info_hash = calculate_info_hash(info_bytes);
-            
-            let piece_hashes: Vec<String> = hex::decode(pieces_hex)
-                .unwrap()
-                .chunks(20)
-                .map(hex::encode)
-                .collect();
-            
-            println!("Tracker URL: {}", tracker_url);
-            println!("Length: {}", length);
-            println!("Info Hash: {}", info_hash);
-            println!("Piece Length: {}", piece_length);
+            println!("Tracker URL: {}", torrent.announce);
+            println!("Length: {}", torrent.length);
+            println!("Info Hash: {}", torrent.info_hash_hex());
+            println!("Piece Length: {}", torrent.piece_length);
             println!("Piece Hashes:");
-            piece_hashes.iter().for_each(|hash| println!("{}", hash));
+            torrent.piece_hashes.iter().for_each(|hash| println!("{}", hash));
+        }
+        "peers" => {
+            let torrent = Torrent::from_file(&args[2]);
+            let peers = torrent.discover_peers();
+            peers.iter().for_each(|peer| println!("{}", peer));
         }
         _ => println!("unknown command: {}", command)
     }
