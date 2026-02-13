@@ -1,5 +1,5 @@
 use std::env;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 fn decode_bencoded_value(encoded_value: &str) -> Value {
     decode_value(encoded_value.as_bytes()).0
@@ -26,6 +26,22 @@ fn decode_value(bytes: &[u8]) -> (Value, usize) {
             }
             
             (Value::Array(values), pos + 1)
+        }
+        Some(&b'd') => {
+            let mut map = Map::new();
+            let mut pos = 1;
+            
+            while bytes[pos] != b'e' {
+                let (key, key_consumed) = decode_value(&bytes[pos..]);
+                let key_str = key.as_str().unwrap().to_string();
+                pos += key_consumed;
+                
+                let (value, value_consumed) = decode_value(&bytes[pos..]);
+                map.insert(key_str, value);
+                pos += value_consumed;
+            }
+            
+            (Value::Object(map), pos + 1)
         }
         Some(&ch) if ch.is_ascii_digit() => {
             let colon = bytes.iter().position(|&b| b == b':').unwrap();
