@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, fs};
 use serde_json::{Map, Value};
 
 fn decode_bencoded_value(encoded_value: &str) -> Value {
@@ -50,10 +50,14 @@ fn decode_value(bytes: &[u8]) -> (Value, usize) {
                 .parse::<usize>()
                 .unwrap();
             let start = colon + 1;
-            let string = std::str::from_utf8(&bytes[start..start + length])
-                .unwrap()
-                .to_string();
-            (Value::String(string), start + length)
+            let end = start + length;
+            
+            let value = std::str::from_utf8(&bytes[start..end])
+                .ok()
+                .map(|s| Value::String(s.to_string()))
+                .unwrap_or_else(|| Value::String(hex::encode(&bytes[start..end])));
+            
+            (value, end)
         }
         _ => panic!("Unhandled encoded value")
     }
@@ -63,11 +67,25 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let command = &args[1];
 
-    if command == "decode" {
-        let encoded_value = &args[2];
-        let decoded_value = decode_bencoded_value(encoded_value);
-        println!("{}", decoded_value.to_string());
-    } else {
-        println!("unknown command: {}", args[1])
+    match command.as_str() {
+        "decode" => {
+            let encoded_value = &args[2];
+            let decoded_value = decode_bencoded_value(encoded_value);
+            println!("{}", decoded_value.to_string());
+        }
+        "info" => {
+            let file_path = &args[2];
+            let bytes = fs::read(file_path).unwrap();
+            let decoded = decode_value(&bytes).0;
+            
+            let torrent = decoded.as_object().unwrap();
+            let tracker_url = torrent.get("announce").and_then(|v| v.as_str()).unwrap();
+            let info = torrent.get("info").and_then(|v| v.as_object()).unwrap();
+            let length = info.get("length").and_then(|v| v.as_i64()).unwrap();
+            
+            println!("Tracker URL: {}", tracker_url);
+            println!("Length: {}", length);
+        }
+        _ => println!("unknown command: {}", command)
     }
 }
