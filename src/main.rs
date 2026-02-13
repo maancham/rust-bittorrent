@@ -1,20 +1,45 @@
 use std::env;
+use serde_json::Value;
 
-#[allow(dead_code)]
-fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
-    match encoded_value.chars().next() {
-        Some(ch) if ch.is_ascii_digit() => {
-            let colon_index = encoded_value.find(':').unwrap();
-            let number = encoded_value[..colon_index].parse::<usize>().unwrap();
-            let string = &encoded_value[colon_index + 1..colon_index + 1 + number];
-            serde_json::Value::String(string.to_string())
+fn decode_bencoded_value(encoded_value: &str) -> Value {
+    decode_value(encoded_value.as_bytes()).0
+}
+
+fn decode_value(bytes: &[u8]) -> (Value, usize) {
+    match bytes.first() {
+        Some(&b'i') => {
+            let end = bytes.iter().position(|&b| b == b'e').unwrap();
+            let number = std::str::from_utf8(&bytes[1..end])
+                .unwrap()
+                .parse::<i64>()
+                .unwrap();
+            (Value::Number(number.into()), end + 1)
         }
-        Some('i') => {
-            let end_index = encoded_value.find('e').unwrap();
-            let number = encoded_value[1..end_index].parse::<i64>().unwrap();
-            serde_json::Value::Number(number.into())
+        Some(&b'l') => {
+            let mut values = Vec::new();
+            let mut pos = 1;
+            
+            while bytes[pos] != b'e' {
+                let (value, consumed) = decode_value(&bytes[pos..]);
+                values.push(value);
+                pos += consumed;
+            }
+            
+            (Value::Array(values), pos + 1)
         }
-        _ => panic!("Unhandled encoded value: {}", encoded_value)
+        Some(&ch) if ch.is_ascii_digit() => {
+            let colon = bytes.iter().position(|&b| b == b':').unwrap();
+            let length = std::str::from_utf8(&bytes[..colon])
+                .unwrap()
+                .parse::<usize>()
+                .unwrap();
+            let start = colon + 1;
+            let string = std::str::from_utf8(&bytes[start..start + length])
+                .unwrap()
+                .to_string();
+            (Value::String(string), start + length)
+        }
+        _ => panic!("Unhandled encoded value")
     }
 }
 
