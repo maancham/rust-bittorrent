@@ -100,13 +100,24 @@ fn main() {
             let tracker_url = torrent.get("announce").and_then(|v| v.as_str()).unwrap();
             let info = torrent.get("info").and_then(|v| v.as_object()).unwrap();
             let length = info.get("length").and_then(|v| v.as_i64()).unwrap();
+            let piece_length = info.get("piece length").and_then(|v| v.as_i64()).unwrap();
+            let pieces_hex = info.get("pieces").and_then(|v| v.as_str()).unwrap();
             
             let info_bytes = extract_info_bytes(&bytes).unwrap();
             let info_hash = calculate_info_hash(info_bytes);
             
+            let piece_hashes: Vec<String> = hex::decode(pieces_hex)
+                .unwrap()
+                .chunks(20)
+                .map(hex::encode)
+                .collect();
+            
             println!("Tracker URL: {}", tracker_url);
             println!("Length: {}", length);
             println!("Info Hash: {}", info_hash);
+            println!("Piece Length: {}", piece_length);
+            println!("Piece Hashes:");
+            piece_hashes.iter().for_each(|hash| println!("{}", hash));
         }
         _ => println!("unknown command: {}", command)
     }
