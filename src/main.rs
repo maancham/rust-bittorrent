@@ -51,6 +51,16 @@ fn main() {
             torrent.download_piece(piece_index, output_path);
             println!("Piece {} downloaded to {}.", piece_index, output_path);
         }
+        "download" => {
+            let output_flag = &args[2];
+            assert_eq!(output_flag, "-o", "Expected -o flag");
+            let output_path = &args[3];
+            let torrent_file = &args[4];
+
+            let torrent = Torrent::from_file(torrent_file);
+            torrent.download(output_path);
+            println!("Downloaded {} to {}.", torrent_file, output_path);
+        }
         _ => println!("unknown command: {}", command),
     }
 }

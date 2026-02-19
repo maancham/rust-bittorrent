@@ -121,6 +121,39 @@ impl Torrent {
         verify_piece(&piece_data, &self.piece_hashes[piece_index]);
         fs::write(output_path, piece_data).unwrap();
     }
+
+    pub fn download(&self, output_path: &str) {
+        let peers = self.discover_peers();
+        let peer_addr = &peers[0];
+
+        let peer_id = generate_peer_id();
+        let mut stream = TcpStream::connect(peer_addr).unwrap();
+
+        perform_handshake(&mut stream, &self.info_hash, &peer_id);
+
+        wait_for_bitfield(&mut stream);
+        send_interested(&mut stream);
+        wait_for_unchoke(&mut stream);
+
+        let num_pieces = self.piece_hashes.len();
+        let mut file_data = Vec::with_capacity(self.length as usize);
+
+        for piece_index in 0..num_pieces {
+            let piece_data = download_piece_blocks(
+                &mut stream,
+                piece_index,
+                self.piece_length as usize,
+                self.length as usize,
+            );
+
+            verify_piece(&piece_data, &self.piece_hashes[piece_index]);
+            file_data.extend_from_slice(&piece_data);
+
+            println!("Downloaded piece {}/{}", piece_index + 1, num_pieces);
+        }
+
+        fs::write(output_path, file_data).unwrap();
+    }
 }
 
 #[cfg(test)]
