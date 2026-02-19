@@ -1,8 +1,10 @@
 mod bencode;
+mod magnet;
 mod peer;
 mod torrent;
 mod utils;
 
+use magnet::MagnetLink;
 use std::env;
 use torrent::Torrent;
 
@@ -60,6 +62,13 @@ fn main() {
             let torrent = Torrent::from_file(torrent_file);
             torrent.download(output_path);
             println!("Downloaded {} to {}.", torrent_file, output_path);
+        }
+        "magnet_parse" => {
+            let magnet_link = &args[2];
+            let magnet = MagnetLink::parse(magnet_link);
+
+            println!("Tracker URL: {}", magnet.tracker_url.as_deref().unwrap_or("N/A"));
+            println!("Info Hash: {}", magnet.info_hash);
         }
         _ => println!("unknown command: {}", command),
     }
