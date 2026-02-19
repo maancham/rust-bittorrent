@@ -1,3 +1,4 @@
+use log::{debug, trace};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::SystemTime;
@@ -30,11 +31,13 @@ pub fn create_handshake(info_hash: &[u8], peer_id: &[u8]) -> Vec<u8> {
 }
 
 pub fn perform_handshake(stream: &mut TcpStream, info_hash: &[u8], peer_id: &[u8]) {
+    trace!("Performing handshake");
     let handshake_msg = create_handshake(info_hash, peer_id);
     stream.write_all(&handshake_msg).unwrap();
 
     let mut response = [0u8; 68];
     stream.read_exact(&mut response).unwrap();
+    debug!("Handshake response received");
 }
 
 pub fn read_message(stream: &mut TcpStream) -> (u8, Vec<u8>) {
@@ -66,17 +69,22 @@ pub fn send_message(stream: &mut TcpStream, message_id: u8, payload: &[u8]) {
 }
 
 pub fn wait_for_bitfield(stream: &mut TcpStream) {
+    trace!("Waiting for bitfield");
     let (msg_id, _) = read_message(stream);
     assert_eq!(msg_id, 5, "Expected bitfield message");
+    debug!("Received bitfield");
 }
 
 pub fn send_interested(stream: &mut TcpStream) {
+    trace!("Sending interested message");
     send_message(stream, 2, &[]);
 }
 
 pub fn wait_for_unchoke(stream: &mut TcpStream) {
+    trace!("Waiting for unchoke");
     let (msg_id, _) = read_message(stream);
     assert_eq!(msg_id, 1, "Expected unchoke message");
+    debug!("Received unchoke");
 }
 
 pub fn send_request(stream: &mut TcpStream, index: u32, begin: u32, length: u32) {
@@ -102,6 +110,10 @@ pub fn download_piece_blocks(
     };
 
     let num_blocks = (actual_piece_length + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    debug!(
+        "Downloading piece {} in {} blocks ({} bytes)",
+        piece_index, num_blocks, actual_piece_length
+    );
 
     for block_index in 0..num_blocks {
         let begin = block_index * BLOCK_SIZE;
@@ -111,12 +123,13 @@ pub fn download_piece_blocks(
             BLOCK_SIZE
         };
 
+        trace!("Requesting block {} (offset: {}, length: {})", block_index, begin, block_length);
         send_request(stream, piece_index as u32, begin as u32, block_length as u32);
     }
 
     let mut piece_data = vec![0u8; actual_piece_length];
 
-    for _ in 0..num_blocks {
+    for block_index in 0..num_blocks {
         let (msg_id, payload) = read_message(stream);
         assert_eq!(msg_id, 7, "Expected piece message");
 
@@ -124,6 +137,7 @@ pub fn download_piece_blocks(
         let block_data = &payload[8..];
 
         piece_data[begin..begin + block_data.len()].copy_from_slice(block_data);
+        trace!("Received block {} ({} bytes)", block_index, block_data.len());
     }
 
     piece_data

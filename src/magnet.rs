@@ -1,3 +1,4 @@
+use log::debug;
 use std::collections::HashMap;
 
 pub struct MagnetLink {
@@ -9,6 +10,7 @@ pub struct MagnetLink {
 
 impl MagnetLink {
     pub fn parse(magnet_url: &str) -> Self {
+        debug!("Parsing magnet link");
         if !magnet_url.starts_with("magnet:?") {
             panic!("Invalid magnet link format");
         }
@@ -23,6 +25,8 @@ impl MagnetLink {
 
         let tracker_url = params.get("tr").map(|tr| url_decode(tr));
         let name = params.get("dn").map(|dn| url_decode(dn));
+
+        debug!("Parsed magnet - info_hash: {}, tracker: {:?}", info_hash, tracker_url);
 
         Self { tracker_url, info_hash, name }
     }
