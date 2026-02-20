@@ -1,4 +1,3 @@
-use log::{debug, trace};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::SystemTime;
@@ -19,11 +18,25 @@ pub fn generate_peer_id() -> [u8; 20] {
 }
 
 pub fn create_handshake(info_hash: &[u8], peer_id: &[u8]) -> Vec<u8> {
+    create_handshake_with_extensions(info_hash, peer_id, false)
+}
+
+pub fn create_handshake_with_extensions(
+    info_hash: &[u8],
+    peer_id: &[u8],
+    support_extensions: bool,
+) -> Vec<u8> {
     let mut handshake = Vec::with_capacity(68);
 
     handshake.push(19);
     handshake.extend_from_slice(b"BitTorrent protocol");
-    handshake.extend_from_slice(&[0u8; 8]);
+
+    let mut reserved = [0u8; 8];
+    if support_extensions {
+        reserved[5] = 0x10;
+    }
+    handshake.extend_from_slice(&reserved);
+
     handshake.extend_from_slice(info_hash);
     handshake.extend_from_slice(peer_id);
 
@@ -31,13 +44,25 @@ pub fn create_handshake(info_hash: &[u8], peer_id: &[u8]) -> Vec<u8> {
 }
 
 pub fn perform_handshake(stream: &mut TcpStream, info_hash: &[u8], peer_id: &[u8]) {
-    trace!("Performing handshake");
     let handshake_msg = create_handshake(info_hash, peer_id);
     stream.write_all(&handshake_msg).unwrap();
 
     let mut response = [0u8; 68];
     stream.read_exact(&mut response).unwrap();
-    debug!("Handshake response received");
+}
+
+pub fn perform_handshake_with_extensions(
+    stream: &mut TcpStream,
+    info_hash: &[u8],
+    peer_id: &[u8],
+) -> String {
+    let handshake_msg = create_handshake_with_extensions(info_hash, peer_id, true);
+    stream.write_all(&handshake_msg).unwrap();
+
+    let mut response = [0u8; 68];
+    stream.read_exact(&mut response).unwrap();
+
+    hex::encode(&response[48..68])
 }
 
 pub fn read_message(stream: &mut TcpStream) -> (u8, Vec<u8>) {
@@ -69,22 +94,17 @@ pub fn send_message(stream: &mut TcpStream, message_id: u8, payload: &[u8]) {
 }
 
 pub fn wait_for_bitfield(stream: &mut TcpStream) {
-    trace!("Waiting for bitfield");
     let (msg_id, _) = read_message(stream);
     assert_eq!(msg_id, 5, "Expected bitfield message");
-    debug!("Received bitfield");
 }
 
 pub fn send_interested(stream: &mut TcpStream) {
-    trace!("Sending interested message");
     send_message(stream, 2, &[]);
 }
 
 pub fn wait_for_unchoke(stream: &mut TcpStream) {
-    trace!("Waiting for unchoke");
     let (msg_id, _) = read_message(stream);
     assert_eq!(msg_id, 1, "Expected unchoke message");
-    debug!("Received unchoke");
 }
 
 pub fn send_request(stream: &mut TcpStream, index: u32, begin: u32, length: u32) {
@@ -110,10 +130,6 @@ pub fn download_piece_blocks(
     };
 
     let num_blocks = (actual_piece_length + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    debug!(
-        "Downloading piece {} in {} blocks ({} bytes)",
-        piece_index, num_blocks, actual_piece_length
-    );
 
     for block_index in 0..num_blocks {
         let begin = block_index * BLOCK_SIZE;
@@ -123,13 +139,12 @@ pub fn download_piece_blocks(
             BLOCK_SIZE
         };
 
-        trace!("Requesting block {} (offset: {}, length: {})", block_index, begin, block_length);
         send_request(stream, piece_index as u32, begin as u32, block_length as u32);
     }
 
     let mut piece_data = vec![0u8; actual_piece_length];
 
-    for block_index in 0..num_blocks {
+    for _ in 0..num_blocks {
         let (msg_id, payload) = read_message(stream);
         assert_eq!(msg_id, 7, "Expected piece message");
 
@@ -137,7 +152,6 @@ pub fn download_piece_blocks(
         let block_data = &payload[8..];
 
         piece_data[begin..begin + block_data.len()].copy_from_slice(block_data);
-        trace!("Received block {} ({} bytes)", block_index, block_data.len());
     }
 
     piece_data
@@ -174,6 +188,21 @@ mod tests {
         assert_eq!(handshake.len(), 68);
         assert_eq!(handshake[0], 19);
         assert_eq!(&handshake[1..20], b"BitTorrent protocol");
+        assert_eq!(&handshake[20..28], &[0u8; 8]);
+        assert_eq!(&handshake[28..48], &info_hash);
+        assert_eq!(&handshake[48..68], &peer_id);
+    }
+
+    #[test]
+    fn test_create_handshake_with_extensions() {
+        let info_hash = [1u8; 20];
+        let peer_id = [2u8; 20];
+        let handshake = create_handshake_with_extensions(&info_hash, &peer_id, true);
+
+        assert_eq!(handshake.len(), 68);
+        assert_eq!(handshake[0], 19);
+        assert_eq!(&handshake[1..20], b"BitTorrent protocol");
+        assert_eq!(handshake[25], 0x10);
         assert_eq!(&handshake[28..48], &info_hash);
         assert_eq!(&handshake[48..68], &peer_id);
     }

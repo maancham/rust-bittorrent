@@ -1,5 +1,5 @@
-use log::debug;
 use std::collections::HashMap;
+use std::net::TcpStream;
 
 pub struct MagnetLink {
     pub tracker_url: Option<String>,
@@ -10,7 +10,6 @@ pub struct MagnetLink {
 
 impl MagnetLink {
     pub fn parse(magnet_url: &str) -> Self {
-        debug!("Parsing magnet link");
         if !magnet_url.starts_with("magnet:?") {
             panic!("Invalid magnet link format");
         }
@@ -26,9 +25,50 @@ impl MagnetLink {
         let tracker_url = params.get("tr").map(|tr| url_decode(tr));
         let name = params.get("dn").map(|dn| url_decode(dn));
 
-        debug!("Parsed magnet - info_hash: {}, tracker: {:?}", info_hash, tracker_url);
-
         Self { tracker_url, info_hash, name }
+    }
+
+    pub fn info_hash_bytes(&self) -> Vec<u8> {
+        hex::decode(&self.info_hash).expect("Invalid info hash")
+    }
+
+    pub fn discover_peers(&self) -> Vec<String> {
+        let tracker_url = self
+            .tracker_url
+            .as_ref()
+            .expect("Tracker URL required for peer discovery");
+
+        let info_hash_bytes = self.info_hash_bytes();
+        let peer_id = crate::peer::generate_peer_id();
+
+        let url = format!(
+            "{}?info_hash={}&peer_id={}&port=6881&uploaded=0&downloaded=0&left=999&compact=1",
+            tracker_url,
+            crate::utils::url_encode_bytes(&info_hash_bytes),
+            crate::utils::url_encode_bytes(&peer_id),
+        );
+
+        let response = reqwest::blocking::get(&url).unwrap();
+        let response_bytes = response.bytes().unwrap();
+
+        let decoded = crate::bencode::decode_value(&response_bytes).0;
+
+        let peers_hex = decoded
+            .as_object()
+            .and_then(|obj| obj.get("peers"))
+            .and_then(|v| v.as_str())
+            .expect("Failed to get peers from tracker response");
+
+        let peers_bytes = hex::decode(peers_hex).unwrap();
+        crate::peer::parse_peers(&peers_bytes)
+    }
+
+    pub fn handshake(&self, peer_addr: &str) -> String {
+        let info_hash_bytes = self.info_hash_bytes();
+        let peer_id = crate::peer::generate_peer_id();
+
+        let mut stream = TcpStream::connect(peer_addr).unwrap();
+        crate::peer::perform_handshake_with_extensions(&mut stream, &info_hash_bytes, &peer_id)
     }
 }
 
@@ -135,5 +175,18 @@ mod tests {
     #[should_panic(expected = "Info hash (xt) is required")]
     fn test_missing_info_hash() {
         MagnetLink::parse("magnet:?dn=test.txt&tr=http://tracker.com");
+    }
+
+    #[test]
+    fn test_info_hash_bytes() {
+        let magnet = MagnetLink {
+            tracker_url: None,
+            info_hash: "ad42ce8109f54c99613ce38f9b4d87e70f24a165".to_string(),
+            name: None,
+        };
+
+        let bytes = magnet.info_hash_bytes();
+        assert_eq!(bytes.len(), 20);
+        assert_eq!(hex::encode(bytes), "ad42ce8109f54c99613ce38f9b4d87e70f24a165");
     }
 }

@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
-use log::{debug, info, trace};
+use log::info;
 
 use crate::bencode::{decode_value, extract_info_bytes};
 use crate::peer::{
@@ -21,7 +21,6 @@ pub struct Torrent {
 
 impl Torrent {
     pub fn from_file(path: &str) -> Self {
-        debug!("Reading torrent file: {}", path);
         let bytes = fs::read(path).unwrap();
         let decoded = decode_value(&bytes).0;
 
@@ -50,13 +49,6 @@ impl Torrent {
             .map(hex::encode)
             .collect();
 
-        trace!(
-            "Parsed torrent - tracker: {}, length: {}, pieces: {}",
-            announce,
-            length,
-            piece_hashes.len()
-        );
-
         Self {
             announce,
             length,
@@ -71,7 +63,6 @@ impl Torrent {
     }
 
     pub fn discover_peers(&self) -> Vec<String> {
-        debug!("Discovering peers from tracker: {}", self.announce);
         let peer_id = generate_peer_id();
         let url = format!(
             "{}?info_hash={}&peer_id={}&port=6881&uploaded=0&downloaded=0&left={}&compact=1",
@@ -81,7 +72,6 @@ impl Torrent {
             self.length
         );
 
-        trace!("Tracker request URL: {}", url);
         let response = reqwest::blocking::get(&url).unwrap();
         let response_bytes = response.bytes().unwrap();
         let decoded = decode_value(&response_bytes).0;
@@ -100,7 +90,6 @@ impl Torrent {
     }
 
     pub fn handshake(&self, peer_addr: &str) -> String {
-        info!("Performing handshake with peer: {}", peer_addr);
         let peer_id = generate_peer_id();
         let handshake_msg = crate::peer::create_handshake(&self.info_hash, &peer_id);
 
@@ -110,27 +99,21 @@ impl Torrent {
         let mut response = [0u8; 68];
         stream.read_exact(&mut response).unwrap();
 
-        let peer_id_hex = hex::encode(&response[48..68]);
-        debug!("Handshake successful, peer ID: {}", peer_id_hex);
-        peer_id_hex
+        hex::encode(&response[48..68])
     }
 
     pub fn download_piece(&self, piece_index: usize, output_path: &str) {
-        info!("Downloading piece {} to {}", piece_index, output_path);
         let peers = self.discover_peers();
         let peer_addr = &peers[0];
-        debug!("Using peer: {}", peer_addr);
 
         let peer_id = generate_peer_id();
         let mut stream = TcpStream::connect(peer_addr).unwrap();
 
         perform_handshake(&mut stream, &self.info_hash, &peer_id);
-        debug!("Handshake completed");
 
         wait_for_bitfield(&mut stream);
         send_interested(&mut stream);
         wait_for_unchoke(&mut stream);
-        debug!("Ready to download");
 
         let piece_data = download_piece_blocks(
             &mut stream,
@@ -141,31 +124,26 @@ impl Torrent {
 
         verify_piece(&piece_data, &self.piece_hashes[piece_index]);
         fs::write(output_path, piece_data).unwrap();
-        info!("Piece {} downloaded successfully", piece_index);
     }
 
     pub fn download(&self, output_path: &str) {
-        info!("Starting download to {}", output_path);
+        info!("Starting download of {} pieces", self.piece_hashes.len());
         let peers = self.discover_peers();
         let peer_addr = &peers[0];
-        debug!("Using peer: {}", peer_addr);
 
         let peer_id = generate_peer_id();
         let mut stream = TcpStream::connect(peer_addr).unwrap();
 
         perform_handshake(&mut stream, &self.info_hash, &peer_id);
-        debug!("Handshake completed");
 
         wait_for_bitfield(&mut stream);
         send_interested(&mut stream);
         wait_for_unchoke(&mut stream);
-        debug!("Ready to download");
 
         let num_pieces = self.piece_hashes.len();
         let mut file_data = Vec::with_capacity(self.length as usize);
 
         for piece_index in 0..num_pieces {
-            debug!("Downloading piece {}/{}", piece_index + 1, num_pieces);
             let piece_data = download_piece_blocks(
                 &mut stream,
                 piece_index,
@@ -180,7 +158,7 @@ impl Torrent {
         }
 
         fs::write(output_path, file_data).unwrap();
-        info!("Download complete: {}", output_path);
+        info!("Download complete");
     }
 }
 

@@ -72,6 +72,16 @@ fn main() {
             println!("Tracker URL: {}", magnet.tracker_url.as_deref().unwrap_or("N/A"));
             println!("Info Hash: {}", magnet.info_hash);
         }
+        "magnet_handshake" => {
+            let magnet_link = &args[2];
+            let magnet = MagnetLink::parse(magnet_link);
+
+            let peers = magnet.discover_peers();
+            let peer_addr = &peers[0];
+
+            let peer_id = magnet.handshake(peer_addr);
+            println!("Peer ID: {}", peer_id);
+        }
         _ => println!("unknown command: {}", command),
     }
 }
