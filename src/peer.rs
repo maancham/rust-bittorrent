@@ -55,14 +55,17 @@ pub fn perform_handshake_with_extensions(
     stream: &mut TcpStream,
     info_hash: &[u8],
     peer_id: &[u8],
-) -> String {
+) -> (String, bool) {
     let handshake_msg = create_handshake_with_extensions(info_hash, peer_id, true);
     stream.write_all(&handshake_msg).unwrap();
 
     let mut response = [0u8; 68];
     stream.read_exact(&mut response).unwrap();
 
-    hex::encode(&response[48..68])
+    let peer_id_hex = hex::encode(&response[48..68]);
+    let peer_supports_extensions = (response[25] & 0x10) != 0;
+
+    (peer_id_hex, peer_supports_extensions)
 }
 
 pub fn read_message(stream: &mut TcpStream) -> (u8, Vec<u8>) {
@@ -91,6 +94,15 @@ pub fn send_message(stream: &mut TcpStream, message_id: u8, payload: &[u8]) {
     stream.write_all(&length.to_be_bytes()).unwrap();
     stream.write_all(&[message_id]).unwrap();
     stream.write_all(payload).unwrap();
+}
+
+pub fn send_extension_handshake(stream: &mut TcpStream) {
+    let handshake_dict = "d1:md11:ut_metadatai16eee";
+
+    let mut payload = vec![0u8];
+    payload.extend_from_slice(handshake_dict.as_bytes());
+
+    send_message(stream, 20, &payload);
 }
 
 pub fn wait_for_bitfield(stream: &mut TcpStream) {
@@ -171,6 +183,7 @@ pub fn parse_peers(peers_bytes: &[u8]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bencode;
 
     #[test]
     fn test_generate_peer_id() {
@@ -215,5 +228,16 @@ mod tests {
         assert_eq!(peers.len(), 2);
         assert_eq!(peers[0], "192.168.1.1:6881");
         assert_eq!(peers[1], "10.0.0.1:6882");
+    }
+
+    #[test]
+    fn test_extension_handshake_format() {
+        let expected = "d1:md11:ut_metadatai16eee";
+        let dict = bencode::decode_value(expected.as_bytes()).0;
+
+        let m_dict = dict.as_object().unwrap().get("m").unwrap();
+        let ut_metadata = m_dict.as_object().unwrap().get("ut_metadata").unwrap();
+
+        assert_eq!(ut_metadata.as_i64().unwrap(), 16);
     }
 }

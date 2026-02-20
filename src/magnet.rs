@@ -1,3 +1,9 @@
+use crate::bencode;
+use crate::peer::{
+    generate_peer_id, parse_peers, perform_handshake_with_extensions, send_extension_handshake,
+    wait_for_bitfield,
+};
+use crate::utils::url_encode_bytes;
 use std::collections::HashMap;
 use std::net::TcpStream;
 
@@ -39,19 +45,19 @@ impl MagnetLink {
             .expect("Tracker URL required for peer discovery");
 
         let info_hash_bytes = self.info_hash_bytes();
-        let peer_id = crate::peer::generate_peer_id();
+        let peer_id = generate_peer_id();
 
         let url = format!(
             "{}?info_hash={}&peer_id={}&port=6881&uploaded=0&downloaded=0&left=999&compact=1",
             tracker_url,
-            crate::utils::url_encode_bytes(&info_hash_bytes),
-            crate::utils::url_encode_bytes(&peer_id),
+            url_encode_bytes(&info_hash_bytes),
+            url_encode_bytes(&peer_id),
         );
 
         let response = reqwest::blocking::get(&url).unwrap();
         let response_bytes = response.bytes().unwrap();
 
-        let decoded = crate::bencode::decode_value(&response_bytes).0;
+        let decoded = bencode::decode_value(&response_bytes).0;
 
         let peers_hex = decoded
             .as_object()
@@ -60,15 +66,25 @@ impl MagnetLink {
             .expect("Failed to get peers from tracker response");
 
         let peers_bytes = hex::decode(peers_hex).unwrap();
-        crate::peer::parse_peers(&peers_bytes)
+        parse_peers(&peers_bytes)
     }
 
     pub fn handshake(&self, peer_addr: &str) -> String {
         let info_hash_bytes = self.info_hash_bytes();
-        let peer_id = crate::peer::generate_peer_id();
+        let peer_id = generate_peer_id();
 
         let mut stream = TcpStream::connect(peer_addr).unwrap();
-        crate::peer::perform_handshake_with_extensions(&mut stream, &info_hash_bytes, &peer_id)
+
+        let (peer_id_hex, peer_supports_extensions) =
+            perform_handshake_with_extensions(&mut stream, &info_hash_bytes, &peer_id);
+
+        wait_for_bitfield(&mut stream);
+
+        if peer_supports_extensions {
+            send_extension_handshake(&mut stream);
+        }
+
+        peer_id_hex
     }
 }
 

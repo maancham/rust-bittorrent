@@ -6,8 +6,8 @@ use log::info;
 
 use crate::bencode::{decode_value, extract_info_bytes};
 use crate::peer::{
-    download_piece_blocks, generate_peer_id, parse_peers, perform_handshake, send_interested,
-    wait_for_bitfield, wait_for_unchoke,
+    create_handshake, download_piece_blocks, generate_peer_id, parse_peers, perform_handshake,
+    send_interested, wait_for_bitfield, wait_for_unchoke,
 };
 use crate::utils::{calculate_hash, url_encode_bytes, verify_piece};
 
@@ -91,7 +91,7 @@ impl Torrent {
 
     pub fn handshake(&self, peer_addr: &str) -> String {
         let peer_id = generate_peer_id();
-        let handshake_msg = crate::peer::create_handshake(&self.info_hash, &peer_id);
+        let handshake_msg = create_handshake(&self.info_hash, &peer_id);
 
         let mut stream = TcpStream::connect(peer_addr).unwrap();
         stream.write_all(&handshake_msg).unwrap();
