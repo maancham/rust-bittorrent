@@ -86,6 +86,16 @@ fn main() {
             println!("Piece Hashes:");
             torrent.piece_hashes.iter().for_each(|h| println!("{}", h));
         }
+        "magnet_download_piece" => {
+            assert_eq!(&args[2], "-o", "Expected -o flag");
+            let output_path = &args[3];
+            let magnet_link = &args[4];
+            let piece_index = args[5].parse::<usize>().unwrap();
+
+            let magnet = MagnetLink::parse(magnet_link);
+            magnet.download_piece(piece_index, output_path);
+            println!("Piece {} downloaded to {}.", piece_index, output_path);
+        }
         "magnet_handshake" => {
             let magnet_link = &args[2];
             let magnet = MagnetLink::parse(magnet_link);

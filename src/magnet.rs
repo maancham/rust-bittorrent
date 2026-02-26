@@ -1,11 +1,13 @@
 use crate::bencode;
 use crate::peer::{
-    generate_peer_id, parse_peers, perform_handshake_with_extensions, receive_extension_handshake,
-    receive_metadata_piece, send_extension_handshake, send_metadata_request, wait_for_bitfield,
+    download_piece_blocks, generate_peer_id, parse_peers, perform_handshake_with_extensions,
+    receive_extension_handshake, receive_metadata_piece, send_extension_handshake, send_interested,
+    send_metadata_request, wait_for_bitfield, wait_for_unchoke,
 };
 use crate::torrent::Torrent;
-use crate::utils::url_encode_bytes;
+use crate::utils::{url_encode_bytes, verify_piece};
 use std::collections::HashMap;
+use std::fs;
 use std::net::TcpStream;
 
 pub struct MagnetLink {
@@ -71,6 +73,28 @@ impl MagnetLink {
     }
 
     pub fn info(&self, peer_addr: &str) -> Torrent {
+        self.fetch_torrent_with_stream(peer_addr).0
+    }
+
+    pub fn download_piece(&self, piece_index: usize, output_path: &str) {
+        let peers = self.discover_peers();
+        let (torrent, mut stream) = self.fetch_torrent_with_stream(&peers[0]);
+
+        send_interested(&mut stream);
+        wait_for_unchoke(&mut stream);
+
+        let piece_data = download_piece_blocks(
+            &mut stream,
+            piece_index,
+            torrent.piece_length as usize,
+            torrent.length as usize,
+        );
+
+        verify_piece(&piece_data, &torrent.piece_hashes[piece_index]);
+        fs::write(output_path, piece_data).unwrap();
+    }
+
+    fn fetch_torrent_with_stream(&self, peer_addr: &str) -> (Torrent, TcpStream) {
         let info_hash_bytes = self.info_hash_bytes();
         let peer_id = generate_peer_id();
 
@@ -89,7 +113,7 @@ impl MagnetLink {
         let metadata = receive_metadata_piece(&mut stream);
 
         let announce = self.tracker_url.as_deref().unwrap_or("");
-        Torrent::from_info_bytes(announce, &metadata)
+        (Torrent::from_info_bytes(announce, &metadata), stream)
     }
 
     pub fn handshake(&self, peer_addr: &str) -> (String, Option<u64>) {
