@@ -1,3 +1,4 @@
+use crate::bencode::decode_value;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::SystemTime;
@@ -18,11 +19,25 @@ pub fn generate_peer_id() -> [u8; 20] {
 }
 
 pub fn create_handshake(info_hash: &[u8], peer_id: &[u8]) -> Vec<u8> {
+    create_handshake_with_extensions(info_hash, peer_id, false)
+}
+
+pub fn create_handshake_with_extensions(
+    info_hash: &[u8],
+    peer_id: &[u8],
+    support_extensions: bool,
+) -> Vec<u8> {
     let mut handshake = Vec::with_capacity(68);
 
     handshake.push(19);
     handshake.extend_from_slice(b"BitTorrent protocol");
-    handshake.extend_from_slice(&[0u8; 8]);
+
+    let mut reserved = [0u8; 8];
+    if support_extensions {
+        reserved[5] = 0x10;
+    }
+    handshake.extend_from_slice(&reserved);
+
     handshake.extend_from_slice(info_hash);
     handshake.extend_from_slice(peer_id);
 
@@ -35,6 +50,23 @@ pub fn perform_handshake(stream: &mut TcpStream, info_hash: &[u8], peer_id: &[u8
 
     let mut response = [0u8; 68];
     stream.read_exact(&mut response).unwrap();
+}
+
+pub fn perform_handshake_with_extensions(
+    stream: &mut TcpStream,
+    info_hash: &[u8],
+    peer_id: &[u8],
+) -> (String, bool) {
+    let handshake_msg = create_handshake_with_extensions(info_hash, peer_id, true);
+    stream.write_all(&handshake_msg).unwrap();
+
+    let mut response = [0u8; 68];
+    stream.read_exact(&mut response).unwrap();
+
+    let peer_id_hex = hex::encode(&response[48..68]);
+    let peer_supports_extensions = (response[25] & 0x10) != 0;
+
+    (peer_id_hex, peer_supports_extensions)
 }
 
 pub fn read_message(stream: &mut TcpStream) -> (u8, Vec<u8>) {
@@ -63,6 +95,45 @@ pub fn send_message(stream: &mut TcpStream, message_id: u8, payload: &[u8]) {
     stream.write_all(&length.to_be_bytes()).unwrap();
     stream.write_all(&[message_id]).unwrap();
     stream.write_all(payload).unwrap();
+}
+
+pub fn send_extension_handshake(stream: &mut TcpStream) {
+    let handshake_dict = "d1:md11:ut_metadatai16eee";
+
+    let mut payload = vec![0u8];
+    payload.extend_from_slice(handshake_dict.as_bytes());
+
+    send_message(stream, 20, &payload);
+}
+
+pub fn receive_metadata_piece(stream: &mut TcpStream) -> Vec<u8> {
+    let (msg_id, payload) = read_message(stream);
+    assert_eq!(msg_id, 20, "Expected extension message");
+
+    let (_, dict_consumed) = decode_value(&payload[1..]);
+    payload[1 + dict_consumed..].to_vec()
+}
+
+pub fn send_metadata_request(stream: &mut TcpStream, ut_metadata_id: u64) {
+    let request_dict = b"d8:msg_typei0e5:piecei0ee";
+    let mut payload = vec![ut_metadata_id as u8];
+    payload.extend_from_slice(request_dict);
+    send_message(stream, 20, &payload);
+}
+
+pub fn receive_extension_handshake(stream: &mut TcpStream) -> u64 {
+    let (msg_id, payload) = read_message(stream);
+    assert_eq!(msg_id, 20, "Expected extension message (id 20)");
+    assert!(!payload.is_empty(), "Extension message payload is empty");
+
+    let dict = decode_value(&payload[1..]).0;
+
+    dict.as_object()
+        .and_then(|obj| obj.get("m"))
+        .and_then(|m| m.as_object())
+        .and_then(|m| m.get("ut_metadata"))
+        .and_then(|v| v.as_u64())
+        .expect("ut_metadata ID not found in extension handshake")
 }
 
 pub fn wait_for_bitfield(stream: &mut TcpStream) {
@@ -143,6 +214,7 @@ pub fn parse_peers(peers_bytes: &[u8]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bencode::decode_value;
 
     #[test]
     fn test_generate_peer_id() {
@@ -160,6 +232,21 @@ mod tests {
         assert_eq!(handshake.len(), 68);
         assert_eq!(handshake[0], 19);
         assert_eq!(&handshake[1..20], b"BitTorrent protocol");
+        assert_eq!(&handshake[20..28], &[0u8; 8]);
+        assert_eq!(&handshake[28..48], &info_hash);
+        assert_eq!(&handshake[48..68], &peer_id);
+    }
+
+    #[test]
+    fn test_create_handshake_with_extensions() {
+        let info_hash = [1u8; 20];
+        let peer_id = [2u8; 20];
+        let handshake = create_handshake_with_extensions(&info_hash, &peer_id, true);
+
+        assert_eq!(handshake.len(), 68);
+        assert_eq!(handshake[0], 19);
+        assert_eq!(&handshake[1..20], b"BitTorrent protocol");
+        assert_eq!(handshake[25], 0x10);
         assert_eq!(&handshake[28..48], &info_hash);
         assert_eq!(&handshake[48..68], &peer_id);
     }
@@ -172,5 +259,68 @@ mod tests {
         assert_eq!(peers.len(), 2);
         assert_eq!(peers[0], "192.168.1.1:6881");
         assert_eq!(peers[1], "10.0.0.1:6882");
+    }
+
+    #[test]
+    fn test_extension_handshake_format() {
+        let expected = "d1:md11:ut_metadatai16eee";
+        let dict = decode_value(expected.as_bytes()).0;
+
+        let m_dict = dict.as_object().unwrap().get("m").unwrap();
+        let ut_metadata = m_dict.as_object().unwrap().get("ut_metadata").unwrap();
+
+        assert_eq!(ut_metadata.as_i64().unwrap(), 16);
+    }
+
+    #[test]
+    fn test_parse_extension_handshake_payload() {
+        let bencoded = b"d1:md11:ut_metadatai42eee";
+        let dict = decode_value(bencoded).0;
+
+        let id = dict
+            .as_object()
+            .and_then(|obj| obj.get("m"))
+            .and_then(|m| m.as_object())
+            .and_then(|m| m.get("ut_metadata"))
+            .and_then(|v| v.as_u64())
+            .expect("ut_metadata ID not found");
+
+        assert_eq!(id, 42);
+    }
+
+    #[test]
+    fn test_parse_extension_handshake_payload_missing_ut_metadata() {
+        let bencoded = b"d1:mdeee";
+        let dict = decode_value(bencoded).0;
+
+        let id = dict
+            .as_object()
+            .and_then(|obj| obj.get("m"))
+            .and_then(|m| m.as_object())
+            .and_then(|m| m.get("ut_metadata"))
+            .and_then(|v| v.as_u64());
+
+        assert!(id.is_none());
+    }
+
+    #[test]
+    fn test_metadata_request_payload_format() {
+        let request_dict = b"d8:msg_typei0e5:piecei0ee";
+        let dict = decode_value(request_dict).0;
+
+        let msg_type = dict
+            .as_object()
+            .and_then(|obj| obj.get("msg_type"))
+            .and_then(|v| v.as_u64())
+            .unwrap();
+
+        let piece = dict
+            .as_object()
+            .and_then(|obj| obj.get("piece"))
+            .and_then(|v| v.as_u64())
+            .unwrap();
+
+        assert_eq!(msg_type, 0);
+        assert_eq!(piece, 0);
     }
 }
