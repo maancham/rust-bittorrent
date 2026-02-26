@@ -1,3 +1,4 @@
+use crate::bencode::decode_value;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::SystemTime;
@@ -105,6 +106,21 @@ pub fn send_extension_handshake(stream: &mut TcpStream) {
     send_message(stream, 20, &payload);
 }
 
+pub fn receive_extension_handshake(stream: &mut TcpStream) -> u64 {
+    let (msg_id, payload) = read_message(stream);
+    assert_eq!(msg_id, 20, "Expected extension message (id 20)");
+    assert!(!payload.is_empty(), "Extension message payload is empty");
+
+    let dict = decode_value(&payload[1..]).0;
+
+    dict.as_object()
+        .and_then(|obj| obj.get("m"))
+        .and_then(|m| m.as_object())
+        .and_then(|m| m.get("ut_metadata"))
+        .and_then(|v| v.as_u64())
+        .expect("ut_metadata ID not found in extension handshake")
+}
+
 pub fn wait_for_bitfield(stream: &mut TcpStream) {
     let (msg_id, _) = read_message(stream);
     assert_eq!(msg_id, 5, "Expected bitfield message");
@@ -183,7 +199,7 @@ pub fn parse_peers(peers_bytes: &[u8]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bencode;
+    use crate::bencode::decode_value;
 
     #[test]
     fn test_generate_peer_id() {
@@ -233,11 +249,42 @@ mod tests {
     #[test]
     fn test_extension_handshake_format() {
         let expected = "d1:md11:ut_metadatai16eee";
-        let dict = bencode::decode_value(expected.as_bytes()).0;
+        let dict = decode_value(expected.as_bytes()).0;
 
         let m_dict = dict.as_object().unwrap().get("m").unwrap();
         let ut_metadata = m_dict.as_object().unwrap().get("ut_metadata").unwrap();
 
         assert_eq!(ut_metadata.as_i64().unwrap(), 16);
+    }
+
+    #[test]
+    fn test_parse_extension_handshake_payload() {
+        let bencoded = b"d1:md11:ut_metadatai42eee";
+        let dict = decode_value(bencoded).0;
+
+        let id = dict
+            .as_object()
+            .and_then(|obj| obj.get("m"))
+            .and_then(|m| m.as_object())
+            .and_then(|m| m.get("ut_metadata"))
+            .and_then(|v| v.as_u64())
+            .expect("ut_metadata ID not found");
+
+        assert_eq!(id, 42);
+    }
+
+    #[test]
+    fn test_parse_extension_handshake_payload_missing_ut_metadata() {
+        let bencoded = b"d1:mdeee";
+        let dict = decode_value(bencoded).0;
+
+        let id = dict
+            .as_object()
+            .and_then(|obj| obj.get("m"))
+            .and_then(|m| m.as_object())
+            .and_then(|m| m.get("ut_metadata"))
+            .and_then(|v| v.as_u64());
+
+        assert!(id.is_none());
     }
 }

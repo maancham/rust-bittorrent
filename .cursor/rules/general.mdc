@@ -1,0 +1,11 @@
+---
+alwaysApply: true
+---
+
+1. Make sure the code is clean and follows the functional programming style when possible.
+2. Do not add comments to the code.
+3. DRY! If you see a pattern being repeated and reused, extract it and use it rather than cluttering the code.
+4. For new functionalities, add unit tests. I don't want them to have full coverage, just main success and failiure paths.
+5. run `cargo fmt` to format the code after changes are made.
+6. run `cargo test` to test the code after changes are made.
+7. When using methods from other modules, import them at the top rather than having something like `crate::bencode::decode_value` in the middle of the code.

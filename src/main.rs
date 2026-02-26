@@ -79,8 +79,11 @@ fn main() {
             let peers = magnet.discover_peers();
             let peer_addr = &peers[0];
 
-            let peer_id = magnet.handshake(peer_addr);
+            let (peer_id, metadata_ext_id) = magnet.handshake(peer_addr);
             println!("Peer ID: {}", peer_id);
+            if let Some(id) = metadata_ext_id {
+                println!("Peer Metadata Extension ID: {}", id);
+            }
         }
         _ => println!("unknown command: {}", command),
     }
