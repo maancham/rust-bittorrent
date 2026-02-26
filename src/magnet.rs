@@ -94,6 +94,29 @@ impl MagnetLink {
         fs::write(output_path, piece_data).unwrap();
     }
 
+    pub fn download(&self, output_path: &str) {
+        let peers = self.discover_peers();
+        let (torrent, mut stream) = self.fetch_torrent_with_stream(&peers[0]);
+
+        send_interested(&mut stream);
+        wait_for_unchoke(&mut stream);
+
+        let file_data: Vec<u8> = (0..torrent.piece_hashes.len())
+            .flat_map(|piece_index| {
+                let piece_data = download_piece_blocks(
+                    &mut stream,
+                    piece_index,
+                    torrent.piece_length as usize,
+                    torrent.length as usize,
+                );
+                verify_piece(&piece_data, &torrent.piece_hashes[piece_index]);
+                piece_data
+            })
+            .collect();
+
+        fs::write(output_path, file_data).unwrap();
+    }
+
     fn fetch_torrent_with_stream(&self, peer_addr: &str) -> (Torrent, TcpStream) {
         let info_hash_bytes = self.info_hash_bytes();
         let peer_id = generate_peer_id();
