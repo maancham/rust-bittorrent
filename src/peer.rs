@@ -106,6 +106,14 @@ pub fn send_extension_handshake(stream: &mut TcpStream) {
     send_message(stream, 20, &payload);
 }
 
+pub fn receive_metadata_piece(stream: &mut TcpStream) -> Vec<u8> {
+    let (msg_id, payload) = read_message(stream);
+    assert_eq!(msg_id, 20, "Expected extension message");
+
+    let (_, dict_consumed) = decode_value(&payload[1..]);
+    payload[1 + dict_consumed..].to_vec()
+}
+
 pub fn send_metadata_request(stream: &mut TcpStream, ut_metadata_id: u64) {
     let request_dict = b"d8:msg_typei0e5:piecei0ee";
     let mut payload = vec![ut_metadata_id as u8];

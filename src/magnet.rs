@@ -1,8 +1,9 @@
 use crate::bencode;
 use crate::peer::{
     generate_peer_id, parse_peers, perform_handshake_with_extensions, receive_extension_handshake,
-    send_extension_handshake, send_metadata_request, wait_for_bitfield,
+    receive_metadata_piece, send_extension_handshake, send_metadata_request, wait_for_bitfield,
 };
+use crate::torrent::Torrent;
 use crate::utils::url_encode_bytes;
 use std::collections::HashMap;
 use std::net::TcpStream;
@@ -69,7 +70,7 @@ impl MagnetLink {
         parse_peers(&peers_bytes)
     }
 
-    pub fn info(&self, peer_addr: &str) {
+    pub fn info(&self, peer_addr: &str) -> Torrent {
         let info_hash_bytes = self.info_hash_bytes();
         let peer_id = generate_peer_id();
 
@@ -80,11 +81,15 @@ impl MagnetLink {
 
         wait_for_bitfield(&mut stream);
 
-        if peer_supports_extensions {
-            send_extension_handshake(&mut stream);
-            let ut_metadata_id = receive_extension_handshake(&mut stream);
-            send_metadata_request(&mut stream, ut_metadata_id);
-        }
+        assert!(peer_supports_extensions, "Peer does not support extensions");
+
+        send_extension_handshake(&mut stream);
+        let ut_metadata_id = receive_extension_handshake(&mut stream);
+        send_metadata_request(&mut stream, ut_metadata_id);
+        let metadata = receive_metadata_piece(&mut stream);
+
+        let announce = self.tracker_url.as_deref().unwrap_or("");
+        Torrent::from_info_bytes(announce, &metadata)
     }
 
     pub fn handshake(&self, peer_addr: &str) -> (String, Option<u64>) {

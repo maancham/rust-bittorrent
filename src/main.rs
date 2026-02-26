@@ -77,9 +77,14 @@ fn main() {
             let magnet = MagnetLink::parse(magnet_link);
 
             let peers = magnet.discover_peers();
-            let peer_addr = &peers[0];
+            let torrent = magnet.info(&peers[0]);
 
-            magnet.info(peer_addr);
+            println!("Tracker URL: {}", torrent.announce);
+            println!("Length: {}", torrent.length);
+            println!("Info Hash: {}", torrent.info_hash_hex());
+            println!("Piece Length: {}", torrent.piece_length);
+            println!("Piece Hashes:");
+            torrent.piece_hashes.iter().for_each(|h| println!("{}", h));
         }
         "magnet_handshake" => {
             let magnet_link = &args[2];

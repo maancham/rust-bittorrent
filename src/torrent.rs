@@ -25,24 +25,28 @@ impl Torrent {
         let decoded = decode_value(&bytes).0;
 
         let torrent_dict = decoded.as_object().unwrap();
-        let info = torrent_dict
-            .get("info")
-            .and_then(|v| v.as_object())
-            .unwrap();
-
         let announce = torrent_dict
             .get("announce")
             .and_then(|v| v.as_str())
             .unwrap()
             .to_string();
 
-        let length = info.get("length").and_then(|v| v.as_i64()).unwrap();
-        let piece_length = info.get("piece length").and_then(|v| v.as_i64()).unwrap();
-
         let info_bytes = extract_info_bytes(&bytes).unwrap();
+        Self::from_info_bytes(&announce, info_bytes)
+    }
+
+    pub fn from_info_bytes(announce: &str, info_bytes: &[u8]) -> Self {
+        let info = decode_value(info_bytes).0;
+        let info_dict = info.as_object().unwrap();
+
+        let length = info_dict.get("length").and_then(|v| v.as_i64()).unwrap();
+        let piece_length = info_dict
+            .get("piece length")
+            .and_then(|v| v.as_i64())
+            .unwrap();
         let info_hash = calculate_hash(info_bytes);
 
-        let pieces_hex = info.get("pieces").and_then(|v| v.as_str()).unwrap();
+        let pieces_hex = info_dict.get("pieces").and_then(|v| v.as_str()).unwrap();
         let piece_hashes: Vec<String> = hex::decode(pieces_hex)
             .unwrap()
             .chunks(20)
@@ -50,7 +54,7 @@ impl Torrent {
             .collect();
 
         Self {
-            announce,
+            announce: announce.to_string(),
             length,
             info_hash,
             piece_length,
@@ -177,5 +181,31 @@ mod tests {
         };
 
         assert_eq!(torrent.info_hash_hex(), "12345678");
+    }
+
+    #[test]
+    fn test_from_info_bytes() {
+        let piece_hash = [0xabu8; 20];
+        let expected_hash_hex = hex::encode(piece_hash);
+
+        let mut info_bytes = Vec::new();
+        info_bytes.extend_from_slice(b"d6:lengthi1234e12:piece lengthi512e6:pieces20:");
+        info_bytes.extend_from_slice(&piece_hash);
+        info_bytes.push(b'e');
+
+        let torrent = Torrent::from_info_bytes("http://tracker.example.com/announce", &info_bytes);
+
+        assert_eq!(torrent.announce, "http://tracker.example.com/announce");
+        assert_eq!(torrent.length, 1234);
+        assert_eq!(torrent.piece_length, 512);
+        assert_eq!(torrent.piece_hashes.len(), 1);
+        assert_eq!(torrent.piece_hashes[0], expected_hash_hex);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_from_info_bytes_missing_length() {
+        let info_bencoded = b"d12:piece lengthi512ee";
+        Torrent::from_info_bytes("http://tracker.example.com/announce", info_bencoded);
     }
 }
