@@ -106,6 +106,13 @@ pub fn send_extension_handshake(stream: &mut TcpStream) {
     send_message(stream, 20, &payload);
 }
 
+pub fn send_metadata_request(stream: &mut TcpStream, ut_metadata_id: u64) {
+    let request_dict = b"d8:msg_typei0e5:piecei0ee";
+    let mut payload = vec![ut_metadata_id as u8];
+    payload.extend_from_slice(request_dict);
+    send_message(stream, 20, &payload);
+}
+
 pub fn receive_extension_handshake(stream: &mut TcpStream) -> u64 {
     let (msg_id, payload) = read_message(stream);
     assert_eq!(msg_id, 20, "Expected extension message (id 20)");
@@ -286,5 +293,26 @@ mod tests {
             .and_then(|v| v.as_u64());
 
         assert!(id.is_none());
+    }
+
+    #[test]
+    fn test_metadata_request_payload_format() {
+        let request_dict = b"d8:msg_typei0e5:piecei0ee";
+        let dict = decode_value(request_dict).0;
+
+        let msg_type = dict
+            .as_object()
+            .and_then(|obj| obj.get("msg_type"))
+            .and_then(|v| v.as_u64())
+            .unwrap();
+
+        let piece = dict
+            .as_object()
+            .and_then(|obj| obj.get("piece"))
+            .and_then(|v| v.as_u64())
+            .unwrap();
+
+        assert_eq!(msg_type, 0);
+        assert_eq!(piece, 0);
     }
 }

@@ -1,7 +1,7 @@
 use crate::bencode;
 use crate::peer::{
     generate_peer_id, parse_peers, perform_handshake_with_extensions, receive_extension_handshake,
-    send_extension_handshake, wait_for_bitfield,
+    send_extension_handshake, send_metadata_request, wait_for_bitfield,
 };
 use crate::utils::url_encode_bytes;
 use std::collections::HashMap;
@@ -67,6 +67,24 @@ impl MagnetLink {
 
         let peers_bytes = hex::decode(peers_hex).unwrap();
         parse_peers(&peers_bytes)
+    }
+
+    pub fn info(&self, peer_addr: &str) {
+        let info_hash_bytes = self.info_hash_bytes();
+        let peer_id = generate_peer_id();
+
+        let mut stream = TcpStream::connect(peer_addr).unwrap();
+
+        let (_, peer_supports_extensions) =
+            perform_handshake_with_extensions(&mut stream, &info_hash_bytes, &peer_id);
+
+        wait_for_bitfield(&mut stream);
+
+        if peer_supports_extensions {
+            send_extension_handshake(&mut stream);
+            let ut_metadata_id = receive_extension_handshake(&mut stream);
+            send_metadata_request(&mut stream, ut_metadata_id);
+        }
     }
 
     pub fn handshake(&self, peer_addr: &str) -> (String, Option<u64>) {
