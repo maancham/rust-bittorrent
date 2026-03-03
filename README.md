@@ -27,22 +27,22 @@ A BitTorrent client built from scratch in Rust. Core BitTorrent protocol include
 
 ## Usage
 
-Build the project:
-
 ```bash
-cargo build --release
+./run.sh <command> [args]
 ```
+
+The script will build the project on first run, then use the cached binary for subsequent runs.
 
 ### Commands
 
 **Decode a bencoded value:**
 ```bash
-./your_program.sh decode "d3:foo3:bar5:helloi52ee"
+./run.sh decode "d3:foo3:bar5:helloi52ee"
 ```
 
 **Inspect a `.torrent` file:**
 ```bash
-./your_program.sh info sample.torrent
+./run.sh info sample.torrent
 # Tracker URL: http://...
 # Length: 92063
 # Info Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f
@@ -54,39 +54,39 @@ cargo build --release
 
 **Discover peers for a torrent:**
 ```bash
-./your_program.sh peers sample.torrent
+./run.sh peers sample.torrent
 ```
 
 **Perform a handshake with a specific peer:**
 ```bash
-./your_program.sh handshake sample.torrent 127.0.0.1:6881
+./run.sh handshake sample.torrent 127.0.0.1:6881
 ```
 
 **Download a single piece:**
 ```bash
-./your_program.sh download_piece -o /tmp/piece-0 sample.torrent 0
+./run.sh download_piece -o /tmp/piece-0 sample.torrent 0
 ```
 
 **Download an entire file:**
 ```bash
-./your_program.sh download -o /tmp/output sample.torrent
+./run.sh download -o /tmp/output sample.torrent
 ```
 
 **Parse a magnet link:**
 ```bash
-./your_program.sh magnet_parse "magnet:?xt=urn:btih:...&tr=..."
+./run.sh magnet_parse "magnet:?xt=urn:btih:...&tr="
 ```
 
 **Perform a handshake via magnet link (with extension negotiation):**
 ```bash
-./your_program.sh magnet_handshake "magnet:?xt=urn:btih:...&tr=..."
+./run.sh magnet_handshake "magnet:?xt=urn:btih:...&tr="
 # Peer ID: 0102030405060708090a0b0c0d0e0f1011121314
 # Peer Metadata Extension ID: 3
 ```
 
 **Fetch torrent info from a magnet link:**
 ```bash
-./your_program.sh magnet_info "magnet:?xt=urn:btih:...&tr=..."
+./run.sh magnet_info "magnet:?xt=urn:btih:...&tr="
 # Tracker URL: http://...
 # Length: 92063
 # Info Hash: d69f91e6b2ae4c542468d1073a71d4ea13879a7f
@@ -97,12 +97,12 @@ cargo build --release
 
 **Download a single piece via magnet link:**
 ```bash
-./your_program.sh magnet_download_piece -o /tmp/piece-0 "magnet:?xt=urn:btih:...&tr=..." 0
+./run.sh magnet_download_piece -o /tmp/piece-0 "magnet:?xt=urn:btih:...&tr=" 0
 ```
 
 **Download an entire file via magnet link:**
 ```bash
-./your_program.sh magnet_download -o /tmp/output "magnet:?xt=urn:btih:...&tr=..."
+./run.sh magnet_download -o /tmp/output "magnet:?xt=urn:btih:...&tr="
 ```
 
 ## How Magnet Links Work
